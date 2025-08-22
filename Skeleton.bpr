@@ -4,9 +4,9 @@
   <MACROS>
     <VERSION value="BCB.06.00"/>
     <PROJECT value="Skeleton.exe"/>
-    <OBJFILES value="Skeleton.obj Main.obj ..\SPL\spl_Image.obj ..\SPL\spl_Contour.obj 
-      ..\SPL\spl_Point.obj ..\SPL\Pyramids\pyramidfilters.obj 
-      ..\SPL\Pyramids\pyramidtools.obj"/>
+    <OBJFILES value="Skeleton.obj Main.obj SPL\spl_Image.obj SPL\spl_Contour.obj 
+      SPL\spl_Point.obj SPL\Pyramids\pyramidfilters.obj 
+      SPL\Pyramids\pyramidtools.obj"/>
     <RESFILES value="Skeleton.res"/>
     <IDLFILES value=""/>
     <IDLGENFILES value=""/>
@@ -23,7 +23,7 @@
       bcbie.bpi websnap.bpi soaprtl.bpi dclocx.bpi dbexpress.bpi dbxcds.bpi 
       indy.bpi bcb2kaxserver.bpi FormTranslationPk.bpi IcsBcb60.bpi MwBcb60.bpi 
       bcbshlctrls.bpi SingleAppInstance.bpi ACM6PK.bpi"/>
-    <PATHCPP value=".;..\SPL;..\SPL;..\SPL;..\SPL\Pyramids;..\SPL\Pyramids"/>
+    <PATHCPP value=".;SPL;SPL;SPL;SPL\Pyramids;SPL\Pyramids"/>
     <PATHPAS value=".;"/>
     <PATHRC value=".;"/>
     <PATHASM value=".;"/>
@@ -33,13 +33,13 @@
     <USERDEFINES value="_DEBUG"/>
     <SYSDEFINES value="NO_STRICT"/>
     <MAINSOURCE value="Skeleton.cpp"/>
-    <INCLUDEPATH value="..\SPL\Pyramids;E:\Digitizer\SPL;..\SPL\Pyramids;..\SPL;E:\OCR\Skeleton;$(BCB)\include;$(BCB)\include\vcl"/>
-    <LIBPATH value="..\SPL\Pyramids;E:\Digitizer\SPL;..\SPL\Pyramids;..\SPL;E:\OCR\Skeleton;$(BCB)\Projects\Lib;$(BCB)\lib\obj;$(BCB)\lib"/>
+    <INCLUDEPATH value="SPL;SPL\Pyramids;E:\Digitizer\SPL;SPL\Pyramids;..\SPL;E:\OCR\Skeleton;$(BCB)\include;$(BCB)\include\vcl"/>
+    <LIBPATH value="SPL;SPL\Pyramids;E:\Digitizer\SPL;SPL\Pyramids;..\SPL;E:\OCR\Skeleton;$(BCB)\Projects\Lib;$(BCB)\lib\obj;$(BCB)\lib"/>
     <WARNINGS value="-w-par"/>
     <OTHERFILES value=""/>
   </MACROS>
   <OPTIONS>
-    <IDLCFLAGS value="-I..\SPL\Pyramids -IE:\Digitizer\SPL -I..\SPL\Pyramids -I..\SPL 
+    <IDLCFLAGS value="-ISPL -ISPL\Pyramids -IE:\Digitizer\SPL -ISPL\Pyramids -I..\SPL 
       -IE:\OCR\Skeleton -I$(BCB)\include -I$(BCB)\include\vcl -src_suffix cpp 
       -D_DEBUG -boa"/>
     <CFLAG1 value="-Od -H=$(BCB)\lib\vcl60.csm -Hc -Vx -Ve -X- -r- -a8 -b- -k -y -v -vi- -c 
@@ -60,11 +60,11 @@
       <FILE FILENAME="Skeleton.res" FORMNAME="" UNITNAME="Skeleton.res" CONTAINERID="ResTool" DESIGNCLASS="" LOCALCOMMAND=""/>
       <FILE FILENAME="Skeleton.cpp" FORMNAME="" UNITNAME="Skeleton" CONTAINERID="CCompiler" DESIGNCLASS="" LOCALCOMMAND=""/>
       <FILE FILENAME="Main.cpp" FORMNAME="FormMain" UNITNAME="Main" CONTAINERID="CCompiler" DESIGNCLASS="" LOCALCOMMAND=""/>
-      <FILE FILENAME="..\SPL\spl_Image.cpp" FORMNAME="" UNITNAME="spl_Image" CONTAINERID="CCompiler" DESIGNCLASS="" LOCALCOMMAND=""/>
-      <FILE FILENAME="..\SPL\spl_Contour.cpp" FORMNAME="" UNITNAME="spl_Contour" CONTAINERID="CCompiler" DESIGNCLASS="" LOCALCOMMAND=""/>
-      <FILE FILENAME="..\SPL\spl_Point.cpp" FORMNAME="" UNITNAME="spl_Point" CONTAINERID="CCompiler" DESIGNCLASS="" LOCALCOMMAND=""/>
-      <FILE FILENAME="..\SPL\Pyramids\pyramidfilters.cpp" FORMNAME="" UNITNAME="pyramidfilters.cpp" CONTAINERID="CCompiler" DESIGNCLASS="" LOCALCOMMAND=""/>
-      <FILE FILENAME="..\SPL\Pyramids\pyramidtools.cpp" FORMNAME="" UNITNAME="pyramidtools.cpp" CONTAINERID="CCompiler" DESIGNCLASS="" LOCALCOMMAND=""/>
+      <FILE FILENAME="SPL\spl_Image.cpp" FORMNAME="" UNITNAME="spl_Image" CONTAINERID="CCompiler" DESIGNCLASS="" LOCALCOMMAND=""/>
+      <FILE FILENAME="SPL\spl_Contour.cpp" FORMNAME="" UNITNAME="spl_Contour" CONTAINERID="CCompiler" DESIGNCLASS="" LOCALCOMMAND=""/>
+      <FILE FILENAME="SPL\spl_Point.cpp" FORMNAME="" UNITNAME="spl_Point" CONTAINERID="CCompiler" DESIGNCLASS="" LOCALCOMMAND=""/>
+      <FILE FILENAME="SPL\Pyramids\pyramidfilters.cpp" FORMNAME="" UNITNAME="pyramidfilters.cpp" CONTAINERID="CCompiler" DESIGNCLASS="" LOCALCOMMAND=""/>
+      <FILE FILENAME="SPL\Pyramids\pyramidtools.cpp" FORMNAME="" UNITNAME="pyramidtools.cpp" CONTAINERID="CCompiler" DESIGNCLASS="" LOCALCOMMAND=""/>
   </FILELIST>
   <BUILDTOOLS>
   </BUILDTOOLS>
@@ -99,13 +99,13 @@ Comments=
 
 [HistoryLists\hlIncludePath]
 Count=2
-Item0=..\SPL\Pyramids;..\SPL;E:\OCR\Skeleton;$(BCB)\include;$(BCB)\include\vcl
-Item1=..\SPL\Pyramids;E:\Digitizer\SPL;C:\Program Files\Borland\CBuilder6\Projects;E:\OCR\Skeleton;$(BCB)\include;$(BCB)\include\vcl
+Item0=SPL\Pyramids;..\SPL;E:\OCR\Skeleton;$(BCB)\include;$(BCB)\include\vcl
+Item1=SPL\Pyramids;E:\Digitizer\SPL;C:\Program Files\Borland\CBuilder6\Projects;E:\OCR\Skeleton;$(BCB)\include;$(BCB)\include\vcl
 
 [HistoryLists\hlLibraryPath]
 Count=2
-Item0=..\SPL\Pyramids;..\SPL;E:\OCR\Skeleton;$(BCB)\Projects\Lib;$(BCB)\lib\obj;$(BCB)\lib
-Item1=..\SPL\Pyramids;E:\Digitizer\SPL;C:\Program Files\Borland\CBuilder6\Projects;E:\OCR\Skeleton;$(BCB)\Projects\Lib;$(BCB)\lib\obj;$(BCB)\lib
+Item0=SPL\Pyramids;..\SPL;E:\OCR\Skeleton;$(BCB)\Projects\Lib;$(BCB)\lib\obj;$(BCB)\lib
+Item1=SPL\Pyramids;E:\Digitizer\SPL;C:\Program Files\Borland\CBuilder6\Projects;E:\OCR\Skeleton;$(BCB)\Projects\Lib;$(BCB)\lib\obj;$(BCB)\lib
 
 [HistoryLists\hlDebugSourcePath]
 Count=1

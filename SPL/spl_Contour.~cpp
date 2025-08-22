@@ -1,0 +1,1580 @@
+//---------------------------------------------------------------------------
+#include <Classes.hpp>
+#pragma hdrstop
+//---------------------------------------------------------------------------
+#include "spl_Contour.h"
+#include "pyramidtools.h"
+#include "windows.h"
+#include <limits>
+//#include <cfloat>
+//---------------------------------------------------------------------------
+int spl_CCW(spl_Point &p0,spl_Point &p1,spl_Point &p2);
+BOOL spl_Intersect(spl_Point &p1,spl_Point &p2,spl_Point &p3,spl_Point &p4);
+BOOL  spl_PtInPolyRect(spl_Contour &Contour,spl_Point &ptTest,spl_Rect &Bound);
+//---------------------------------------------------------------------------
+#pragma package(smart_init)
+//---------------------------------------------------------------------------
+void spl_SaveContour(FILE *file,spl_Contour &Contour)
+{
+    int count=Contour.Points.size();
+    spl_Point *buff=new spl_Point[count];
+    for(int i=0;i<count;i++)
+        buff[i]=Contour.Points[i];
+
+    fwrite(&Contour.ContourInfo,sizeof(Contour.ContourInfo),1,file);
+    fwrite(&count,sizeof(int),1,file);
+    fwrite(buff,count*sizeof(spl_Point),1,file);
+    if(buff)
+        delete[] buff;
+}
+//---------------------------------------------------------------------------
+void spl_LoadContour(FILE *file,spl_Contour &Contour)
+{
+    int count;
+    fread(&Contour.ContourInfo,sizeof(Contour.ContourInfo),1,file);
+    fread(&count,sizeof(int),1,file);
+    spl_Point *buff=new spl_Point[count];
+    fread(buff,count*sizeof(spl_Point),1,file);
+    Contour.Points.erase(Contour.Points.begin(),Contour.Points.end());
+    Contour.Points.resize(count);
+    for(int i=0;i<count;i++)
+        Contour.Points[i]=buff[i];
+    if(buff)
+        delete[] buff;
+}
+//---------------------------------------------------------------------------
+void spl_SaveContour(char *FileName,spl_Contour &Contour)
+{
+    FILE *file;
+    file=fopen(FileName,"wb");
+    spl_SaveContour(file,Contour);
+    fclose(file);
+}
+//---------------------------------------------------------------------------
+void spl_LoadContour(char *FileName,spl_Contour &Contour)
+{
+    FILE *file;
+    file=fopen(FileName,"rb");
+    spl_LoadContour(file,Contour);
+    fclose(file);
+}
+//---------------------------------------------------------------------------
+spl_Rect spl_ComputeFrame(spl_Contour &Contour)
+{
+    if(Contour.Points.empty())
+        return spl_Rect(0,0,0,0);
+    int count=Contour.Points.size();
+    spl_Rect Frame=spl_Rect(spl_MaxInt,spl_MaxInt,-spl_MaxInt,-spl_MaxInt);
+    spl_Point P;
+    for(int i=0;i<count;i++)
+    {
+        P=Contour.Points[i];
+        if(P.x<Frame.left)
+            Frame.left=P.x;
+        if(P.y<Frame.top)
+            Frame.top=P.y;
+        if(P.x>Frame.right)
+            Frame.right=P.x;
+        if(P.y>Frame.bottom)
+            Frame.bottom=P.y;
+    }
+    return Frame;
+}
+//---------------------------------------------------------------------------
+spl_BoundingBox spl_ComputeBoundingBox(spl_Contour &Contour)
+{
+    if(Contour.Points.empty())  return spl_BoundingBox();
+
+    spl_BoundingBox BoundingBox(spl_Global_k,Contour.Points[0]);
+    for(UINT i=1;i<Contour.Points.size();i++)
+    {
+        BoundingBox.Add(Contour.Points[i]);
+    }
+    BoundingBox.Update();
+    return BoundingBox;
+}
+//---------------------------------------------------------------------------
+void spl_ScaleContour(spl_Contour &iContour,spl_Rect Frame,bool Minimize,double Error,spl_Contour &oContour)
+{
+    int count=iContour.Points.size();
+    oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+    oContour.ContourInfo=iContour.ContourInfo;
+    if(count<=0)
+        return;
+    spl_Point iP,oP,tP;
+    spl_Rect R=spl_ComputeFrame(iContour);
+    double Ax,Bx;
+    double Ay,By;
+    int oCount;
+    int Index=0;
+
+    if(R.Width()==0.0)
+        return;
+    if(R.Height()==0.0)
+        return;
+    Ax=Frame.Width()/R.Width();
+    Bx=Frame.left-Ax*R.left;
+    Ay=Frame.Height()/R.Height();
+    By=Frame.top-Ay*R.top;
+
+    oContour.Points.resize(count);
+    if(Minimize)
+    {
+        double E2=Error*Error;
+        for(int i=0;i<count;i++)
+        {
+            iP=iContour.Points[i];
+            oP.x=Ax*iP.x+Bx;
+            oP.y=Ay*iP.y+By;
+            if(Index==0)
+            {
+                oContour.Points[Index]=oP;
+                Index++;
+            }
+            else
+            if(spl_PDistance2(&oContour.Points[Index-1],&oP)>E2)
+            {
+                oContour.Points[Index]=oP;
+                Index++;
+            }
+        }
+        oContour.Points.resize(Index);
+        if(oContour.Points.size()<3)
+            oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+    }
+    else
+    {
+        for(int i=0;i<count;i++)
+        {
+            iP=iContour.Points[i];
+            oP.x=Ax*iP.x+Bx;
+            oP.y=Ay*iP.y+By;
+            oContour.Points[i]=oP;
+        }
+    }
+}
+//---------------------------------------------------------------------------
+void spl_ScaleContour(spl_Contour &iContour,float fXScale,float fYScale,bool Minimize,double Error,spl_Contour &oContour)
+{
+    int count=iContour.Points.size();
+    oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+    oContour.ContourInfo=iContour.ContourInfo;
+    if(count<=0)
+        return;
+    spl_Point iP,oP,tP;
+    double Ax,Bx;
+    double Ay,By;
+    int oCount;
+    int Index=0;
+
+    Ax=fXScale;
+    Bx=0.0;
+    Ay=fYScale;
+    By=0.0;
+
+    oContour.Points.resize(count);
+    if(Minimize)
+    {
+        double E2=Error*Error;
+        for(int i=0;i<count;i++)
+        {
+            iP=iContour.Points[i];
+            oP.x=Ax*iP.x+Bx;
+            oP.y=Ay*iP.y+By;
+            if(Index==0)
+            {
+                oContour.Points[Index]=oP;
+                Index++;
+            }
+            else
+            if(spl_PDistance2(&oContour.Points[Index-1],&oP)>E2)
+            {
+                oContour.Points[Index]=oP;
+                Index++;
+            }
+        }
+        oContour.Points.resize(Index);
+        if(oContour.Points.size()<3)
+            oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+    }
+    else
+    {
+        for(int i=0;i<count;i++)
+        {
+            iP=iContour.Points[i];
+            oP.x=Ax*iP.x+Bx;
+            oP.y=Ay*iP.y+By;
+            oContour.Points[i]=oP;
+        }
+    }
+}
+//---------------------------------------------------------------------------
+// Return B-Spline Curve
+void spl_ReduceContour(spl_Contour &iContour,double Scale,double Error,spl_Contour &oContour)
+{
+    if(Scale<=0.0)
+        Scale=1.0;
+    spl_Contour tPoly;
+    spl_Rect Frame=spl_ComputeFrame(iContour);
+
+    spl_Rect R=spl_Rect(Scale*Frame.left,Scale*Frame.top,Scale*Frame.right,Scale*Frame.bottom);
+    spl_ScaleContour(iContour,R,true,Error,tPoly);
+    spl_ScaleContour(tPoly,Frame,false,Error,oContour);
+    if(oContour.Points.size()<3)
+        oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+}
+//---------------------------------------------------------------------------
+void spl_ConvertBSplineToBezier(spl_Contour &iContour,spl_Contour &oContour)
+{
+    int count=iContour.Points.size();
+    oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+    oContour.ContourInfo=iContour.ContourInfo;
+    if(count<=0)
+        return;
+
+    spl_Point s0,s1,s2,s3;
+    spl_Point b0,b1,b2,b3;
+    bool IsFirst=true;
+
+    for(int i=0;i<count;i++)
+    {
+        s0=iContour.Points[(0+i) % count];
+        s1=iContour.Points[(1+i) % count];
+        s2=iContour.Points[(2+i) % count];
+        s3=iContour.Points[(3+i) % count];
+
+        b0.x=(s0.x+4*s1.x+s2.x)/6.0;
+        b0.y=(s0.y+4*s1.y+s2.y)/6.0;
+
+        b1.x=(4*s1.x+2*s2.x)/6.0;
+        b1.y=(4*s1.y+2*s2.y)/6.0;
+
+        b2.x=(2*s1.x+4*s2.x)/6.0;
+        b2.y=(2*s1.y+4*s2.y)/6.0;
+
+        b3.x=(s1.x+4*s2.x+s3.x)/6.0;
+        b3.y=(s1.y+4*s2.y+s3.y)/6.0;
+
+        if(IsFirst)
+        {
+            oContour.Points.push_back(b0);
+        }
+        oContour.Points.push_back(b1);
+        oContour.Points.push_back(b2);
+        oContour.Points.push_back(b3);
+        IsFirst=false;
+    }
+
+    // Reduce Bezier
+    spl_Contour Temp;
+    bool Reduced=true;
+    while(Reduced)
+    {
+        Reduced=spl_ReduceBezier(oContour,Temp);
+        if(!Reduced)
+        {
+            oContour=Temp;
+            break;
+        }
+        Reduced=spl_ReduceBezier(Temp,oContour);
+    }
+
+    if(oContour.Points.size()<3)
+        oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+}
+//---------------------------------------------------------------------------
+bool spl_IsValidBezierCurve(int N,double Error,spl_Point &b0,spl_Point &b1,
+                            spl_Point &b2,spl_Point &b3,spl_Point &b4,
+                            spl_Point &b5,spl_Point &b6,spl_Point &c0,
+                            spl_Point &c1,spl_Point &c2,spl_Point &c3)
+{
+    if(N<=0) N=1;
+    double du,u2;
+    spl_Point P1,P2;
+    double error=0.0;
+
+    // Define First Part Curve
+    du=1.0/double(N/2.0);
+    for(double u=0.0;u<1.0;u+=du)
+    {
+        u2=u/2.0;
+        P1.x=(1-u2)*(1-u2)*(1-u2)*c0.x+3*u2*(1-u2)*(1-u2)*c1.x+3*u2*u2*(1-u2)*c2.x+u2*u2*u2*c3.x;
+        P1.y=(1-u2)*(1-u2)*(1-u2)*c0.y+3*u2*(1-u2)*(1-u2)*c1.y+3*u2*u2*(1-u2)*c2.y+u2*u2*u2*c3.y;
+
+        P2.x=(1-u)*(1-u)*(1-u)*b0.x+3*u*(1-u)*(1-u)*b1.x+3*u*u*(1-u)*b2.x+u*u*u*b3.x;
+        P2.y=(1-u)*(1-u)*(1-u)*b0.y+3*u*(1-u)*(1-u)*b1.y+3*u*u*(1-u)*b2.y+u*u*u*b3.y;
+
+        error+=spl_PDistance2(&P1,&P2);
+    }
+
+    // Define Second Part Curve
+    for(double u=0.0;u<1.0;u+=du)
+    {
+        u2=(u+1.0)/2.0;
+        P1.x=(1-u2)*(1-u2)*(1-u2)*c0.x+3*u2*(1-u2)*(1-u2)*c1.x+3*u2*u2*(1-u2)*c2.x+u2*u2*u2*c3.x;
+        P1.y=(1-u2)*(1-u2)*(1-u2)*c0.y+3*u2*(1-u2)*(1-u2)*c1.y+3*u2*u2*(1-u2)*c2.y+u2*u2*u2*c3.y;
+
+        P2.x=(1-u)*(1-u)*(1-u)*b3.x+3*u*(1-u)*(1-u)*b4.x+3*u*u*(1-u)*b5.x+u*u*u*b6.x;
+        P2.y=(1-u)*(1-u)*(1-u)*b3.y+3*u*(1-u)*(1-u)*b4.y+3*u*u*(1-u)*b5.y+u*u*u*b6.y;
+
+        error+=spl_PDistance2(&P1,&P2);
+    }
+
+    return (error<=Error*Error);
+}
+//---------------------------------------------------------------------------
+bool spl_ReduceBezier(spl_Contour &iContour,spl_Contour &oContour)
+{
+    int count=iContour.Points.size();
+    oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+    oContour.ContourInfo=iContour.ContourInfo;
+    if(count<=0)
+        return false;
+
+    spl_Point b0,b1,b2,b3,b4,b5,b6;
+    spl_Point c0,c1,c2,c3;
+    bool IsValid;
+//    double Error=1.0;// (Error >= 1.0)
+//    int N=10*Error;
+//    double Error=10.0;// (Error >= 1.0)
+    double Error=5.0;// (Error >= 1.0)
+    int N=200;
+    bool Reduced=false;
+
+    // First Point
+    oContour.Points.push_back(iContour.Points[0]);
+    
+    int d=6;
+    int n=d*(count/d);
+    int dcount=count-n;
+    for(int i=0;i<n;i+=d)
+    {
+        b0=iContour.Points[(0+i) % count];
+        b1=iContour.Points[(1+i) % count];
+        b2=iContour.Points[(2+i) % count];
+        b3=iContour.Points[(3+i) % count];
+        b4=iContour.Points[(4+i) % count];
+        b5=iContour.Points[(5+i) % count];
+        b6=iContour.Points[(6+i) % count];
+
+        c0=b0;
+
+        c1.x=2*b1.x-b0.x;
+        c1.y=2*b1.y-b0.y;
+
+        c2.x=2*b5.x-b6.x;
+        c2.y=2*b5.y-b6.y;
+
+        c3=b6;
+
+        IsValid=spl_IsValidBezierCurve(N,Error,b0,b1,b2,b3,b4,b5,b6,c0,c1,c2,c3);
+        if(IsValid)
+        {
+            oContour.Points.push_back(c1);
+            oContour.Points.push_back(c2);
+            oContour.Points.push_back(c3);
+            Reduced=true;
+        }
+        else
+        {
+            oContour.Points.push_back(b1);
+            oContour.Points.push_back(b2);
+            oContour.Points.push_back(b3);
+            oContour.Points.push_back(b4);
+            oContour.Points.push_back(b5);
+            oContour.Points.push_back(b6);
+        }
+    }
+
+    // Rest Points
+    for(int i=n+0;i<n+dcount;i++)
+    {
+        b0=iContour.Points[(0+i) % count];
+        oContour.Points.push_back(b0);
+    }
+
+    if(oContour.Points.size()<3)
+        oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+
+    return Reduced;
+}
+//---------------------------------------------------------------------------
+void spl_DivideCurveByDirection(spl_Contour &iContour,double Step,spl_Contour &oContour)
+{
+    int count=iContour.Points.size();
+    oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+    oContour.ContourInfo=iContour.ContourInfo;
+    if(count<=0)    return;
+
+    spl_Point p,op;
+    double Distance;
+
+    // First Point
+    p=iContour.Points[0];
+    op=p;
+    oContour.Points.push_back(p);
+    for(int i=0;i<count+Step;i++)
+    {
+        p=iContour.Points[i % count];
+        if(spl_Distance(&p,&op,&spl_Global_n)>=Step)
+        {
+            oContour.Points.push_back(p);
+            op=p;
+        }
+    }
+
+    if(oContour.Points.size()<3)
+        oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+}
+//---------------------------------------------------------------------------
+/*
+void spl_DivideCurveByLength(spl_Contour &iContour,double Step,spl_Contour &oContour)
+{
+    int count=iContour.Points.size();
+    oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+    oContour.ContourInfo=iContour.ContourInfo;
+    if(count<=0)    return;
+
+    spl_Point p,op;
+    double Step2=Step*Step;
+
+    // First Point
+    p=iContour.Points[0];
+    op=p;
+    oContour.Points.push_back(p);
+    for(int i=0;i<count+Step;i++)
+    {
+        p=iContour.Points[i % count];
+        if(spl_PDistance2(&p,&op)>=Step2)
+        {
+            oContour.Points.push_back(p);
+            op=p;
+        }
+    }
+
+    if(oContour.Points.size()<3)
+        oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+}
+*/
+//---------------------------------------------------------------------------
+void spl_DivideCurveByLength(spl_Contour &iContour,double Step,spl_Contour &oContour)
+{
+    int count=iContour.Points.size();
+    oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+    oContour.ContourInfo=iContour.ContourInfo;
+    if(count<=0)    return;
+
+    spl_Point p,op;
+    double s;
+
+    // First Point
+    p=iContour.Points[0];
+    op=p;
+    oContour.Points.push_back(p);
+    s=0.0;
+    for(int i=0;i<count+Step;i++)
+    {
+        p=iContour.Points[i % count];
+        s=spl_PDistance(&op,&p);
+        if(s>=Step)
+        {
+            oContour.Points.push_back(p);
+            op=p;
+            s=0.0;
+        }
+//        s+=spl_PDistance(&op,&p);
+//        op=p;
+    }
+
+    if(oContour.Points.size()<3)
+        oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+}
+//---------------------------------------------------------------------------
+void spl_DivideBezierCurveByDirection(spl_Contour &iContour,double Step,double Error,spl_Contour &oContour)
+{
+    int count=iContour.Points.size();
+    oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+    oContour.ContourInfo=iContour.ContourInfo;
+    if(count<=0)
+        return;
+
+    spl_Point p,op;
+    double du=Error;
+
+    // First Point
+    p=iContour.Points[0];
+    op=p;
+//    oContour.Points.push_back(p);
+    for(int i=0;i<count;i+=3)
+    {
+        for(double u=0.0;u<=1.0;u+=du)
+        {
+            p.x=(1-u)*(1-u)*(1-u)*iContour.Points[(0+i) % count].x+3*u*(1-u)*(1-u)*iContour.Points[(1+i) % count].x+3*u*u*(1-u)*iContour.Points[(2+i) % count].x+u*u*u*iContour.Points[(3+i) % count].x;
+            p.y=(1-u)*(1-u)*(1-u)*iContour.Points[(0+i) % count].y+3*u*(1-u)*(1-u)*iContour.Points[(1+i) % count].y+3*u*u*(1-u)*iContour.Points[(2+i) % count].y+u*u*u*iContour.Points[(3+i) % count].y;
+//	        if((spl_PDistance(&p,&op) >= Step) && (spl_Distance(&p,&op,&spl_Global_n) >= Step))
+	        if(spl_Distance(&p,&op,&spl_Global_n) >= Step)
+    	    {
+        	    oContour.Points.push_back(p);
+            	op=p;
+	        }
+        }
+    }
+
+    if(oContour.Points.size()<3)
+        oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+}
+//---------------------------------------------------------------------------
+void spl_DivideBezierCurve(spl_Contour &iContour,double Step,double Error,spl_Contour &oContour)
+{
+    int count=iContour.Points.size();
+    oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+    oContour.ContourInfo=iContour.ContourInfo;
+    if(count<=0)
+        return;
+
+    double s,os;
+    spl_Point p,op;
+    double du=Error;
+
+    s=0.0;
+    os=s;
+
+    // First Point
+    p=iContour.Points[0];
+    oContour.Points.push_back(p);
+    for(int i=0;i<count;i+=3)
+    {
+        for(double u=0.0;u<=1.0;u+=du)
+        {
+            p.x=(1-u)*(1-u)*(1-u)*iContour.Points[(0+i) % count].x+3*u*(1-u)*(1-u)*iContour.Points[(1+i) % count].x+3*u*u*(1-u)*iContour.Points[(2+i) % count].x+u*u*u*iContour.Points[(3+i) % count].x;
+            p.y=(1-u)*(1-u)*(1-u)*iContour.Points[(0+i) % count].y+3*u*(1-u)*(1-u)*iContour.Points[(1+i) % count].y+3*u*u*(1-u)*iContour.Points[(2+i) % count].y+u*u*u*iContour.Points[(3+i) % count].y;
+            s+=spl_PDistance(&p,&op);
+            op=p;
+            if(s-os>Step)
+            {
+                oContour.Points.push_back(p);
+                os=s;
+                op=p;
+            }
+        }
+    }
+
+    if(oContour.Points.size()<3)
+        oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+}
+//---------------------------------------------------------------------------
+void spl_DivideBezierCurve(spl_Contour &iContour,spl_Image *pPattern,double Error,spl_Contour &oContour)
+{
+    oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+    oContour.ContourInfo=iContour.ContourInfo;
+    int count=iContour.Points.size();
+    if(count<=0)
+        return;
+	if(pPattern==NULL)
+	{
+		return;
+	}
+	else
+    if(pPattern->ppLines==NULL)
+	{
+        MessageBox(0,"Invalid Image (You Must Call <UpdateLines> Before This Operation)","Error",0);
+		return;
+	}
+
+    spl_Point p,op;
+    double du=Error;
+    int Index=0;
+//    int w=pPattern->Width;
+//    int h=pPattern->Height;
+//    double Step=w/sqrt(2.0);
+    double Step=4.5;
+    spl_BoundingBox BoundingBox;
+    spl_Point left,right,n;
+    double Distance;
+    int Index0,Index1;
+    BoundingBox=spl_ComputeBoundingBox(iContour);
+    n=BoundingBox.n;
+
+    // Finding left and right
+    left=BoundingBox.left;
+    right=BoundingBox.right;
+
+    // First Point
+    spl_FindNearestPoint(iContour,left,Index0,Distance);
+    if(Index0<0) return;
+    Index1=Index0;
+/*
+    for(Index=Index0;Index<Index0+count;Index++)
+    {
+        p=iContour.Points[Index % count];
+//        if((spl_Distance(&p,&left,&n)>=2.0*Step)&&(spl_Distance(&p,&right,&n)>=2.0*Step))
+        if((spl_Distance(&p,&left,&n)>=1.0*Step)&&(spl_Distance(&p,&right,&n)>=1.0*Step))
+        {
+            Index1=Index;
+            break;
+        }
+    }
+*/    
+
+    p.x=iContour.Points[Index1].x;
+    p.y=iContour.Points[Index1].y;
+    oContour.Points.push_back(p);
+    op=p;
+    for(Index=Index1;Index<Index1+count-3;Index+=3)
+    {
+        for(double u=0.0;u<=1.0;u+=du)
+        {
+            p.x=(1-u)*(1-u)*(1-u)*iContour.Points[(0+Index) % count].x+3*u*(1-u)*(1-u)*iContour.Points[(1+Index) % count].x+3*u*u*(1-u)*iContour.Points[(2+Index) % count].x+u*u*u*iContour.Points[(3+Index) % count].x;
+            p.y=(1-u)*(1-u)*(1-u)*iContour.Points[(0+Index) % count].y+3*u*(1-u)*(1-u)*iContour.Points[(1+Index) % count].y+3*u*u*(1-u)*iContour.Points[(2+Index) % count].y+u*u*u*iContour.Points[(3+Index) % count].y;
+//            if((spl_Distance(&p,&op,&BoundingBox.n)>=1.0)&&(spl_Distance(&p,&left,&n)>=Step)&&(spl_Distance(&p,&right,&n)>=Step)&&(!pPattern->ppLines[int(p.y) % h][int(p.x) % w]))
+//            if((spl_Distance(&p,&op,&BoundingBox.n)>=1.0)&&(spl_Distance(&p,&left,&n)>=Step)&&(spl_Distance(&p,&right,&n)>=Step))
+            if((spl_Distance(&p,&op,&BoundingBox.n)>=Step))
+            {
+                oContour.Points.push_back(p);
+                op=p;
+            }
+        }
+    }
+
+    // Last Point
+    if((spl_Distance(&oContour.Points[0],&op,&BoundingBox.n)>=Step/2.0))
+    {
+        oContour.Points.push_back(op);
+    }
+    
+    if(oContour.Points.size()<3)
+        oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+}
+//---------------------------------------------------------------------------
+void spl_FindNearestPoint(spl_Contour &iContour,spl_Point &p,int &PointIndex,double &Distance)
+{
+    PointIndex=0;
+
+    double Dist;
+    Distance=spl_MaxInt;
+    for(UINT PIndex=0;PIndex<iContour.Points.size();PIndex++)
+    {
+        Dist=spl_PDistance2(&p,&iContour.Points[PIndex]);
+        if(Dist<Distance)
+        {
+            Distance=Dist;
+            PointIndex=PIndex;
+            if(Distance<=1.0) break;
+        }
+    }
+    if(Distance<spl_MaxInt)    Distance=sqrt(Distance);
+}
+//---------------------------------------------------------------------------
+static spl_Contour *_piPoly;
+static spl_Contour *_poPoly;
+static spl_Point _p;
+static spl_Point _p1;
+static spl_Point _p2;
+static double _Epsilon2;
+static double _J;
+static double _d;
+static double _MaxD;
+static double _D;
+static double _L;
+//---------------------------------------------------------------------------
+void Assemple(DWORD i1,DWORD i2)
+{
+    if(i2<=i1)
+        return;
+
+    // Get _p1, _p2
+    _p1=(*_piPoly).Points[i1];
+    _p2=(*_piPoly).Points[i2];
+
+    // Get _J, i3
+    DWORD i3;
+    _J=0.0f;
+    _MaxD=-spl_MaxInt;
+    for(DWORD i=i1;i<=i2;i++)
+    {
+        _p=(*_piPoly).Points[i];
+
+        if(_p2.x==_p1.x)// (Vertical Line)
+            _d=(_p.x-_p1.x);
+        else
+        if(_p2.y==_p1.y)// (Horizontal Line)
+            _d=(_p.y-_p1.y);
+        else              // (Any Line)
+        {
+            _L=spl_PDistance(&_p1,&_p2);
+            if(_L>0.0f)
+                _d=fabs(((_p.x-_p1.x)*(_p2.y-_p1.y)-(_p.y-_p1.y)*(_p2.x-_p1.x))/_L);
+            else
+                _d=spl_PDistance(&_p1,&_p);
+        } 
+        _D=_d*_d;
+
+        _J+=_D;
+        if(_D>_MaxD)
+        {
+            _MaxD=_D;
+            i3=i;
+        }
+    }
+
+    // Assemble
+    if(_J<=_Epsilon2)
+    {
+        (*_poPoly).Points.push_back((*_piPoly).Points[i1]);
+    }
+    else
+    {
+        Assemple(i1,i3);
+        Assemple(i3,i2);
+    }
+}
+//---------------------------------------------------------------------------
+void spl_FindBestContour(double Epsilon,spl_Contour &iContour,spl_Contour &oContour)
+{
+    oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+    oContour.ContourInfo=iContour.ContourInfo;
+    if(iContour.Points.empty())
+        return;
+
+    // Initialize Global
+    _piPoly=&iContour;
+    _poPoly=&oContour;
+    _Epsilon2=Epsilon*Epsilon;
+
+    // Call Recursive Procedure
+    Assemple(0,iContour.Points.size()-1);
+
+    // Add Last Point
+    oContour.Points.push_back(iContour.Points[iContour.Points.size()-1]);
+//    if(oContour.Points.size()<3)
+//        oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+}
+//---------------------------------------------------------------------------
+void spl_FindBestContour(double Epsilon,DWORD i1,DWORD i2,spl_Contour &iContour,spl_Contour &oContour)
+{
+    oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+    oContour.ContourInfo=iContour.ContourInfo;
+    if(iContour.Points.empty())
+        return;
+
+    // Initialize Global
+    _piPoly=&iContour;
+    _poPoly=&oContour;
+    _Epsilon2=Epsilon*Epsilon;
+
+    // Fill First Elements
+    for(DWORD i=0;i<i1;i++)
+    {
+        oContour.Points.push_back(iContour.Points[i]);
+    }
+
+    // Call Recursive Procedure
+    Assemple(i1,i2);
+                       
+    // Fill Last Elements
+    for(DWORD i=i2;i<iContour.Points.size();i++)
+    {
+        oContour.Points.push_back(iContour.Points[i]);
+    }
+    if(oContour.Points.size()<3)
+        oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+}
+//---------------------------------------------------------------------------
+void spl_SmoothContour(spl_Contour &iContour,char *Filter,int Order,int Degree,spl_Contour &oContour)
+{
+    oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+    oContour.ContourInfo=iContour.ContourInfo;
+    if(iContour.Points.empty())
+        return;
+    spl_Point p;
+    int n;
+    int N;
+    int N2;
+    double  g[MAXF];					// Coefficients of the reduce filter
+    long  	ng;							// Number of coefficients of the reduce filter
+    double	h[MAXF];					// Coefficients of the expansion filter
+    long 	nh;							// Number of coefficients of the expansion filter
+    short	IsCentered;					// Equal TRUE if the filter is a centered spline, FALSE otherwise
+
+    oContour=iContour;
+    n=oContour.Points.size();
+    if(n % 2 == 0)
+        N2=n/2;
+    else
+        N2=n/2+1;
+    N=2*N2;
+
+    double *Xs=new double[N];
+    double *Ys=new double[N];
+    double *Xd=new double[N2]; // Reduced Signal
+    double *Yd=new double[N2];
+
+    for(int k=0;k<Degree;k++)
+    {
+        n=oContour.Points.size();
+        if(n % 2 == 0)
+            N2=n/2;
+        else
+            N2=n/2+1;
+        N=2*N2;
+
+        for(int i=0;i<N;i++)
+        {
+            p=oContour.Points[i % n];
+
+            Xs[i]=p.x;
+            Ys[i]=p.y;
+        }
+
+        GetPyramidFilter(Filter,Order,g,&ng,h,&nh,&IsCentered);
+        Reduce_1D(Xs,N,Xd,g,ng,IsCentered);
+        Reduce_1D(Ys,N,Yd,g,ng,IsCentered);
+
+        oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+        for(int i=0;i<N2;i++)
+        {
+            p.x=Xd[i];
+            p.y=Yd[i];
+            oContour.Points.push_back(p);
+        }
+    }
+
+    if(Xs)
+        delete[] Xs;
+    if(Ys)
+        delete[] Ys;
+    if(Xd)
+        delete[] Xd;
+    if(Yd)
+        delete[] Yd;
+}
+//---------------------------------------------------------------------------
+void spl_DrawPolygonContour(HDC hdc,spl_Contour &Contour)
+{
+    if(Contour.Points.empty())  return;
+    int count=Contour.Points.size();
+    POINT *pPoints=new POINT[count+1];
+    spl_Point P;
+    for(int i=0;i<=count;i++)
+    {
+        P=Contour.Points[i % count];
+        pPoints[i].x=P.x;
+        pPoints[i].y=P.y;
+    }
+
+    Polygon(hdc,pPoints,count+1);
+
+    if(pPoints)
+        delete[] pPoints;
+}
+//---------------------------------------------------------------------------
+void spl_DrawFilledContour(HDC hdc,spl_Contour &Contour,TColor FillColor,TColor LineColor)
+{
+    if(Contour.Points.empty())  return;
+    int count=Contour.Points.size();
+    POINT *pPoints=new POINT[count+1];
+    spl_Point P;
+    for(int i=0;i<=count;i++)
+    {
+        P=Contour.Points[i % count];
+        pPoints[i].x=P.x;
+        pPoints[i].y=P.y;
+    }
+
+    HBRUSH hNewBrush,hOldBrush;
+    HPEN hNewPen,hOldPen;
+
+    hNewBrush=CreateSolidBrush(FillColor);
+    hOldBrush=SelectObject(hdc,hNewBrush);
+
+    hNewPen=CreatePen(PS_SOLID,1,LineColor);
+    hOldPen=SelectObject(hdc,hNewPen);
+
+    Polygon(hdc,pPoints,count+1);
+
+    SelectObject(hdc,hOldBrush);
+    DeleteObject(hNewBrush);
+
+    SelectObject(hdc,hOldPen);
+    DeleteObject(hNewPen);
+
+    if(pPoints)
+        delete[] pPoints;
+}
+//---------------------------------------------------------------------------
+void spl_DrawPolylineContour(HDC hdc,spl_Contour &Contour)
+{
+    if(Contour.Points.empty())  return;
+    int count=Contour.Points.size();
+    if(count<=0)    return;
+    POINT *pPoints=new POINT[count+1];
+    spl_Point P;
+    for(int i=0;i<=count;i++)
+    {
+        P=Contour.Points[i % count];
+        pPoints[i].x=P.x;
+        pPoints[i].y=P.y;
+    }
+
+    Polyline(hdc,pPoints,count+1);
+
+    if(pPoints)
+        delete[] pPoints;
+}
+//---------------------------------------------------------------------------
+void spl_DrawBezierContour(HDC hdc,spl_Contour &Contour)
+{
+    if(Contour.Points.empty())  return;
+    int count=Contour.Points.size();
+    POINT *pPoints=new POINT[count];
+    spl_Point P;
+    int PointsCount;
+    for(int i=0;i<count;i++)
+    {
+        P=Contour.Points[i % count];
+        pPoints[i].x=P.x;
+        pPoints[i].y=P.y;
+    }
+
+    PointsCount=3*(count/3)+1;
+    PolyBezier(hdc,pPoints,PointsCount);
+
+    if(pPoints)
+        delete[] pPoints;
+}
+//---------------------------------------------------------------------------
+/*
+void spl_GenerateCurve(spl_Contour &iContour,bool Closed,double Error,spl_Contour &oContour)
+{
+    oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+    if(iContour.Points.size()<3)    return;
+    spl_Point c1,c2;
+    oContour=iContour;
+    UINT count;
+    for(UINT i=0;i<oContour.Points.size();)
+    {
+        count=oContour.Points.size();
+        if(spl_PDistance(&oContour.Points[(i+0) % count],&oContour.Points[(i+1) % count])>=Error)
+        {
+            c1.x=(oContour.Points[(i+0) % count].x+oContour.Points[(i+1) % count].x)/2.0;
+            c1.y=(oContour.Points[(i+0) % count].y+oContour.Points[(i+1) % count].y)/2.0;
+        }
+        else
+        {
+            i++;
+            continue;
+        }
+
+        if(spl_PDistance(&oContour.Points[(i+1) % count],&oContour.Points[(i+2) % count])>=Error)
+        {
+            c2.x=(oContour.Points[(i+1) % count].x+oContour.Points[(i+2) % count].x)/2.0;
+            c2.y=(oContour.Points[(i+1) % count].y+oContour.Points[(i+2) % count].y)/2.0;
+        }
+        else
+        {
+            c2=oContour.Points[(i+2) % count];
+        }
+
+        oContour.Points.erase(&oContour.Points[(i+1) % count]);
+
+        oContour.Points.insert(&oContour.Points[(i+1) % count],c2);
+        oContour.Points.insert(&oContour.Points[(i+1) % count],c1);
+
+    }
+}
+*/
+//---------------------------------------------------------------------------
+void spl_GenerateBezierCurve(spl_Contour &iContour,bool Closed,double Error,spl_Contour &oContour)
+{
+    oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+    oContour.ContourInfo=iContour.ContourInfo;
+    if(iContour.Points.size()<3)    return;
+    spl_Contour Temp=iContour;
+    spl_Point c1,c2;
+    UINT count;
+    bool Found=true;
+    int N=0;
+    while(Found)
+    {
+        Found=false;
+        oContour.Points.erase(oContour.Points.begin(),oContour.Points.end());
+        count=Temp.Points.size();
+
+//        oContour.Points.push_back(Temp.Points[0]);
+        for(UINT i=0;i<count;i++)
+        {
+            oContour.Points.push_back(Temp.Points[(i+0) % count]);
+            if(spl_PDistance(&Temp.Points[(i+0) % count],&Temp.Points[(i+1) % count])>=Error)
+            {
+                c1.x=(Temp.Points[(i+0) % count].x+Temp.Points[(i+1) % count].x)/2.0;
+                c1.y=(Temp.Points[(i+0) % count].y+Temp.Points[(i+1) % count].y)/2.0;
+                Found=true;
+
+                oContour.Points.push_back(c1);
+            }
+            else
+            {
+                oContour.Points.push_back(Temp.Points[(i+1) % count]);
+            }
+        }
+        oContour.Points.push_back(Temp.Points[count-1]);
+        Temp=oContour;
+        N++;
+        if(N>=50)   break;
+    }
+}
+//---------------------------------------------------------------------------
+void spl_ReverseCurve(double Height,spl_Contour &Contour)
+{
+    for(spl_UInt i=0;i<Contour.Points.size();i++)
+    {
+        Contour.Points[i].y=Height-1-Contour.Points[i].y;
+    }
+}
+//---------------------------------------------------------------------------
+void spl_ScaleCurve(double Scale,spl_Contour &Contour)
+{
+    for(spl_UInt i=0;i<Contour.Points.size();i++)
+    {
+        Contour.Points[i].x*=Scale;
+        Contour.Points[i].y*=Scale;
+    }
+}
+//---------------------------------------------------------------------------
+struct spl_Custom_Point
+{
+	double x;
+    double y;
+    int Index;
+    bool operator ==(const spl_Custom_Point &P)
+    {
+        return ((x==P.x)&&(y==P.y));
+    }
+    bool operator !=(const spl_Custom_Point &P)
+    {
+        return ((x!=P.x)||(y!=P.y));
+    }
+    bool operator <(const spl_Custom_Point &P)
+    {
+        return ((x+spl_MaxImageWidth*y)<(P.x+spl_MaxImageWidth*P.y));// ZigZag Algorithm
+    }
+    bool operator >(const spl_Custom_Point &P)
+    {
+        return ((x+spl_MaxImageWidth*y)>(P.x+spl_MaxImageWidth*P.y));// ZigZag Algorithm
+    }
+};
+//---------------------------------------------------------------------------
+int __fastcall Compare_2_spl_Custom_Point(void * Item1, void * Item2)
+{
+	if(*((spl_Custom_Point *)Item1) < *((spl_Custom_Point *)Item2))
+    	return -1;
+    else
+	if(*((spl_Custom_Point *)Item1) > *((spl_Custom_Point *)Item2))
+    	return 1;
+    else
+    	return 0;
+}
+//---------------------------------------------------------------------------
+void spl_RedefineCurve(spl_Contour &Contour)
+{
+    spl_PrepareCurve(2.0,Contour);
+
+/*
+    if(Contour.Points.size() < 3)
+    {
+	    Contour.Points.erase(Contour.Points.begin(),Contour.Points.end());
+      	return;
+    }
+	TList *pList = new TList();
+    spl_Point P;
+    spl_Custom_Point *p,*op;
+
+    for(spl_UInt i=0;i<Contour.Points.size();i++)
+    {
+        P=Contour.Points[i];
+
+        p = new spl_Custom_Point();
+		p->x = P.x;
+		p->y = P.y;
+		p->Index = i;
+        pList->Add(p);
+    }
+    pList->Sort(Compare_2_spl_Custom_Point);
+
+    spl_UInt nLength,nMaxLength;
+    spl_UInt nI1 = 0,nI2 = 0;
+    bool Found = false;
+    nMaxLength = 0;
+    op = (spl_Custom_Point *)pList->Items[0];
+    for(int i=1;i<pList->Count;i++)
+    {
+     	p = (spl_Custom_Point *)pList->Items[i];
+        if(*p == *op)
+        {
+	        nLength = spl_ABS(p->Index - op->Index);
+			if((nLength > nMaxLength) && (nLength >= 2))
+            {
+            	nMaxLength = nLength;
+                nI1 = spl_MIN(p->Index,op->Index);
+                nI2 = spl_MAX(p->Index,op->Index);
+                Found = true;
+            }
+        }
+        op = p;
+    }
+    if(Found)
+    {
+		spl_Contour Temp;
+	    for(spl_UInt i= nI1;i <= nI2;i++)
+    	{
+        	P=Contour.Points[i];
+            Temp.Points.push_back(P);
+        }
+	    Contour = Temp;
+	    if(Contour.Points.size() < 3)
+	    {
+		    Contour.Points.erase(Contour.Points.begin(),Contour.Points.end());
+	    }
+    }
+
+    if(pList)
+    {
+    	for(int i=0;i<pList->Count;i++)
+        {
+         	p = (spl_Custom_Point *)pList->Items[i];
+            if(p)
+            {
+             	delete p;
+                p = NULL;
+            }
+        }
+        pList->Clear();
+
+     	delete pList;
+        pList = NULL;
+    }
+*/    
+}
+//---------------------------------------------------------------------------
+void spl_PrepareCurve(double Space,spl_Contour &Contour)
+{
+    if(Contour.Points.empty())  return;
+    spl_Point p,op;
+    double Space2=Space*Space;
+    p=Contour.Points[0];
+    op=p;
+    for(spl_UInt i=1;i<Contour.Points.size();)
+    {
+        p=Contour.Points[i];
+        if(spl_PDistance2(&op,&p)>=Space2)
+        {
+            i++;
+            op=p;
+        }
+        else
+        {
+            Contour.Points.erase(&Contour.Points[i]);
+        }
+    }
+}
+//---------------------------------------------------------------------------
+void spl_CurveToSnake(spl_Contour &Contour,bool IsHole)
+{
+    spl_UInt count=Contour.Points.size();
+    if(IsHole)
+    {
+        for(spl_UInt i=0;i<count;i++)
+        {
+            Contour.Points[i].pPrev=&Contour.Points[(i+1) % count];
+            Contour.Points[i].pNext=&Contour.Points[(count+i-1) % count];
+        }
+    }
+    else
+    {
+        for(spl_UInt i=0;i<count;i++)
+        {
+            Contour.Points[i].pPrev=&Contour.Points[(count+i-1) % count];
+            Contour.Points[i].pNext=&Contour.Points[(i+1) % count];
+        }
+    }
+}
+//---------------------------------------------------------------------------
+void spl_CloseCurve(spl_Contour &Contour)
+{
+    if(Contour.Points.empty())  return;
+    spl_Point p0=Contour.Points[0];
+    spl_UInt count=Contour.Points.size();
+    if(p0!=Contour.Points[count-1])
+    {
+        Contour.Points.push_back(p0);
+    }
+}
+//---------------------------------------------------------------------------
+spl_UInt spl_CurveSize(spl_Contour &Contour)
+{
+    return Contour.Points.size();
+}
+//---------------------------------------------------------------------------
+void spl_ExtrudeBySkeleton(double ExtrudeDistance,spl_Contour &Contour,spl_Contour &Extrude)
+{
+    Extrude.Points.erase(Extrude.Points.begin(),Extrude.Points.end());
+    if(Contour.Points.empty())  return;
+    spl_UInt count=Contour.Points.size();
+    Extrude=Contour;
+    for(spl_UInt i=1;i<=count;i++)
+    {
+        spl_GetSkeletonPoint(ExtrudeDistance,0.0,&Contour.Points[(i-1) % count],&Contour.Points[(i+0) % count],&Contour.Points[(i+1) % count],&Extrude.Points[(i+0) % count]);
+    }
+}
+//---------------------------------------------------------------------------
+// Clockwise: ÈÇÊÌÇå ÚÞÇÑÈ ÇáÓÇÚÉ
+bool spl_IsClockwiseVertex(spl_Point *p1,spl_Point *p2,spl_Point *p3)
+{
+    return (((p2->x-p1->x)*(p3->y-p2->y)-(p2->y-p1->y)*(p3->x-p2->x))>=0);
+}
+//---------------------------------------------------------------------------
+spl_Point spl_TriCenter(spl_Point *p1,spl_Point *p2,spl_Point *p3)
+{
+    spl_Point C;
+    C.x=(p1->x+p2->x+p3->x)/3.0;
+    C.y=(p1->y+p2->y+p3->y)/3.0;
+    return C;
+}
+//---------------------------------------------------------------------------
+double spl_TriArea(spl_Point *p1,spl_Point *p2,spl_Point *p3)
+{
+    return spl_ABS(0.5*((p2->x-p1->x)*(p3->y-p1->y)-(p2->y-p1->y)*(p3->x-p1->x)));
+}
+//---------------------------------------------------------------------------
+spl_Point spl_Center(spl_Contour &Contour)
+{
+    if(Contour.Points.empty())  return splPoint(0,0);
+    spl_UInt count=Contour.Points.size();
+    spl_Point Center=splPoint(0,0);
+    for(spl_UInt i=0;i<count;i++)
+    {
+        Center.x+=Contour.Points[i].x;
+        Center.y+=Contour.Points[i].y;
+    }
+    Center.x/=double(count);
+    Center.y/=double(count);
+    return Center;
+}
+//---------------------------------------------------------------------------
+double spl_ContourLength(spl_Contour &Contour)
+{
+    if(Contour.Points.empty())	return 0.0;
+    spl_UInt count=Contour.Points.size();
+    spl_Point OP,P;
+    double Length = 0.0;
+    OP = Contour.Points[0];
+    for(spl_UInt i=1;i<=count;i++)
+    {
+        P = Contour.Points[i % count];
+        Length += spl_PDistance(&OP,&P);
+        OP = P;
+    }
+    return Length;
+}
+//---------------------------------------------------------------------------
+double spl_Area(spl_Contour &Contour)
+{
+    if(Contour.Points.size()<3)    return 0.0;
+
+    double S=0.0,Si;
+    double Signi=1.0;
+    spl_Point P0,P1,P2,P3;
+    spl_UInt count = Contour.Points.size();
+    P0=Contour.Points[0];
+    P3=P0;
+    for(spl_UInt i=1;i<count-1;i++)
+    {
+        P1=Contour.Points[i % count];
+        P2=Contour.Points[(i+1) % count];
+
+        if(spl_IsClockwiseVertex(&P3,&P1,&P2))
+            Signi=+1.0;
+        else
+            Signi=-1.0;
+
+        Si=spl_TriArea(&P0,&P1,&P2);
+        S+=Signi*Si;
+        P3=P1;
+    }
+    return spl_ABS(S);
+}
+//---------------------------------------------------------------------------
+spl_Point spl_GeoCenter(spl_Contour &Contour)
+{
+    if(Contour.Points.size()<3)    return splPoint(0,0);
+
+    spl_Point Ti;
+    double S,Si;
+    double Signi=1.0;
+    spl_Point P0,P1,P2,P3;
+    spl_Point GeoCenter=splPoint(0,0);
+    spl_UInt count = Contour.Points.size();
+    S=spl_Area(Contour);
+    P0=Contour.Points[0];
+    P3=P0;
+    for(spl_UInt i=1;i<count-1;i++)
+    {
+        P1=Contour.Points[i % count];
+        P2=Contour.Points[(i+1) % count];
+
+        if(spl_IsClockwiseVertex(&P3,&P1,&P2))
+            Signi=+1.0;
+        else
+            Signi=-1.0;
+
+        Si=spl_TriArea(&P0,&P1,&P2);
+        Ti=spl_TriCenter(&P0,&P1,&P2);
+
+        GeoCenter.x+=Ti.x*Signi*Si;
+        GeoCenter.y+=Ti.y*Signi*Si;
+
+        P3=P1;
+    }
+    if(S!=0.0)
+    {
+        GeoCenter.x/=S;
+        GeoCenter.y/=S;
+    }
+    else
+        GeoCenter=splPoint(0,0);
+
+    return GeoCenter;
+}
+//---------------------------------------------------------------------------
+void spl_ConvexHull(spl_Contour &Contour,spl_Contour &ConvexHull)
+{
+    ConvexHull.Points.clear();
+    if(Contour.Points.size()<3)
+    {
+        ConvexHull=Contour;
+        return;
+    }
+    spl_UInt count;
+    spl_Point P0,P1,P2;
+    bool Found;
+    spl_Contour Temp;
+    Temp=Contour;
+
+    LBegin:;
+    count=Temp.Points.size();
+    P0=Temp.Points[0];
+    P1=Temp.Points[1];
+    Found=false;
+    for(spl_UInt i=2;i<count+2;i++)
+    {
+        P2=Temp.Points[i % count];
+
+        if(spl_IsClockwiseVertex(&P0,&P1,&P2))
+        {
+            ConvexHull.Points.push_back(P1);
+            P0=P1;
+            P1=P2;
+        }
+        else
+        {
+            P1=P2;
+            Found=true;
+        }
+    }
+    if(Found)
+    {
+        Temp=ConvexHull;
+        ConvexHull.Points.clear();
+        goto LBegin;
+    }
+}
+//---------------------------------------------------------------------------
+/*
+void spl_FindNearestEdge(spl_Contour &Contour,spl_Point P)
+{
+    for(spl_UInt i=0;i<Contour.Points.size();i++)
+    {
+        Contour.Points[i].x*=Scale;
+        Contour.Points[i].y*=Scale;
+    }
+}
+*/
+//---------------------------------------------------------------------------
+void spl_FindMinimalDistance(spl_Contour &Contour1,spl_Contour &Contour2,int &P1Index,int &P2Index)
+{
+    spl_Point Center1,Center2;
+    double P1Distance,P2Distance;
+    Center1=spl_GeoCenter(Contour1);
+    Center2=spl_GeoCenter(Contour2);
+
+    spl_FindNearestPoint(Contour1,Center2,P1Index,P1Distance);
+    spl_FindNearestPoint(Contour2,Center1,P2Index,P2Distance);
+}
+//---------------------------------------------------------------------------
+void spl_FindSharpEdges(spl_Contour &Contour,double dMinAngle,double dMaxAngle,spl_IntArray &Indices)
+{
+	Indices.clear();
+    if(Contour.Points.size()<3)    return;
+    spl_Point P0,P1,P2;
+    double dAngle;
+    spl_UInt count = Contour.Points.size();
+    P0 = Contour.Points[0];
+    for(spl_UInt i=1;i<count;i++)
+    {
+        P1 = Contour.Points[i % count];
+        P2 = Contour.Points[(i+1) % count];
+
+//		dAngle = spl_ABS(spl_Angle(&P0,&P1,&P2));
+		dAngle = spl_Angle(&P0,&P1,&P2);
+		if((dAngle >= dMinAngle) && (dAngle <= dMaxAngle))
+        {
+	        Indices.push_back(i);
+        }
+
+        P0 = P1;
+    }
+}
+//---------------------------------------------------------------------------
+double spl_CalculateTheTour(spl_Contour &Contour,spl_UInt nStartIndex,spl_UInt nEndIndex)
+{
+    double dTour = 0.0;
+    if(Contour.Points.size() < 2)    return dTour;
+    if(nStartIndex > nEndIndex)	return dTour;
+    if(nEndIndex >= Contour.Points.size())	return nEndIndex = Contour.Points.size()-1;
+
+    spl_Point OP,P,Center;
+    double dLength,dBent;
+    spl_UInt count = Contour.Points.size();
+    OP = Contour.Points[nStartIndex];
+    Center = spl_GeoCenter(Contour); 
+//    for(spl_UInt i=1;i<count;i++)
+    for(spl_UInt i=nStartIndex+1;i<=nEndIndex;i++)
+    {
+        P = Contour.Points[i % count];
+        if(P.x - OP.x != 0.0)
+	        dBent = (P.y - OP.y)/(P.x - OP.x);
+        else
+        	dBent = 0.0;
+        dLength = spl_PDistance(&Center,&P);
+        dTour += dBent*dLength;
+
+        OP = P;
+    }
+    return dTour;
+}
+//---------------------------------------------------------------------------
+/*************************************************************************
+ * FUNCTION:   G_PtInPolygon
+ *
+ * PURPOSE
+ * This routine determines if the point passed is in the polygon. It uses
+ * the classical polygon hit-testing algorithm: a horizontal ray starting
+ * at the point is extended infinitely rightwards and the number of
+ * polygon edges that intersect the ray are counted. If the number is odd,
+ * the point is inside the polygon.
+ *
+ * RETURN VALUE
+ * (BOOL) TRUE if the point is inside the polygon, FALSE if not.
+ *************************************************************************/
+bool spl_PointInContour(spl_Contour &Contour,spl_Point &P)
+{
+   spl_Rect r;
+   spl_Point pt2;
+   WORD wnumintsct = 0;
+
+   if (!spl_PtInPolyRect(Contour,P,r))
+      return FALSE;
+
+   pt2.x = r.right + 1500;
+   pt2.y = P.y;
+
+   // Now go through each of the lines in the polygon and see if it
+   // intersects
+   for(UINT i=0;i<Contour.Points.size()-1;i++)
+   {
+      if (spl_Intersect(P, pt2, Contour.Points[i], Contour.Points[i+1]))
+         wnumintsct++;
+   }
+
+   // And the last line
+   if (spl_Intersect(P, pt2, Contour.Points[Contour.Points.size()-1], Contour.Points[0]))
+      wnumintsct++;
+
+   return (wnumintsct&1) ;
+}
+//---------------------------------------------------------------------------
+/*************************************************************************
+ * FUNCTION:   G_PtInPolyRect
+ *
+ * PURPOSE
+ * This routine determines if a point is within the smallest rectangle
+ * that encloses a polygon.
+ *
+ * RETURN VALUE
+ * (BOOL) TRUE or FALSE depending on whether the point is in the rect or
+ * not.
+ *************************************************************************/
+BOOL  spl_PtInPolyRect(spl_Contour &Contour,spl_Point &ptTest,spl_Rect &Bound)
+{
+   	// If a bounding rect has not been passed in, calculate it
+    double xmin, xmax, ymin, ymax;
+    spl_Point ppt;
+    xmin = ymin = DBL_MAX ;
+    xmax = ymax = -DBL_MAX ;
+    for(UINT i=0;i<Contour.Points.size();i++)
+    {
+        ppt = Contour.Points[i];
+        if (ppt.x < xmin)
+            xmin = ppt.x;
+        if (ppt.x > xmax)
+            xmax = ppt.x;
+        if (ppt.y < ymin)
+            ymin = ppt.y;
+        if (ppt.y > ymax)
+            ymax = ppt.y;
+    }
+    Bound = splRect(xmin,ymin,xmax,ymax);
+   	return Bound.PointInIt(ptTest);
+}
+//---------------------------------------------------------------------------
+/*************************************************************************
+ * FUNCTION:   Intersect
+ *
+ * PURPOSE
+ * Given two line segments, determine if they intersect.
+ *
+ * RETURN VALUE
+ * TRUE if they intersect, FALSE if not.
+ *************************************************************************/
+BOOL spl_Intersect(spl_Point &p1,spl_Point &p2,spl_Point &p3,spl_Point &p4)
+{
+    return ((( spl_CCW(p1, p2, p3) * spl_CCW(p1, p2, p4)) <= 0)
+        && (( spl_CCW(p3, p4, p1) * spl_CCW(p3, p4, p2)  <= 0)));
+}
+/*************************************************************************
+ * FUNCTION:   CCW (CounterClockWise)
+ *
+ * PURPOSE
+ * Determines, given three points, if when travelling from the first to
+ * the second to the third, we travel in a counterclockwise direction.
+ *
+ * RETURN VALUE
+ * (int) 1 if the movement is in a counterclockwise direction, -1 if
+ * not.
+ *************************************************************************/
+int spl_CCW(spl_Point &p0,spl_Point &p1,spl_Point &p2)
+{
+	double dx1,dx2;
+   	double dy1,dy2;
+
+   	dx1 = p1.x - p0.x ; dx2 = p2.x - p1.x ;
+   	dy1 = p1.y - p0.y ; dy2 = p2.y - p1.y ;
+
+   	/* This is basically a slope comparison: we don't do divisions because
+    * of divide by zero possibilities with pure horizontal and pure
+    * vertical lines.
+    */
+    return ((dx1 * dy2 > dy1 * dx2) ? 1 : -1) ;
+}
+//---------------------------------------------------------------------------
+
